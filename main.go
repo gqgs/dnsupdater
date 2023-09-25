@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -42,18 +43,26 @@ func process() error {
 	defer ticker.Stop()
 
 	for ; true; <-ticker.C {
+		var ips []net.IP
 		ipv4, err := externalIPv4()
 		if err != nil {
 			slog.Error("failed getting external IPv4", "error", err)
-			continue
+		} else {
+			ips = append(ips, ipv4)
 		}
 		ipv6, err := externalIPv6()
 		if err != nil {
 			slog.Error("failed getting external IPv6", "error", err)
+		} else {
+			ips = append(ips, ipv6)
+		}
+
+		if len(ips) == 0 {
+			slog.Error("not enough ips found")
 			continue
 		}
 
-		if err = updateDNS(o, ipv4, ipv6); err != nil {
+		if err = updateDNS(o, ips...); err != nil {
 			slog.Error("failed updating DNS", "error", err)
 		}
 	}
@@ -105,7 +114,7 @@ func externalIPv6() (net.IP, error) {
 			return ip, nil
 		}
 	}
-	return net.IP{}, nil
+	return net.IP{}, errors.New("not found")
 }
 
 func updateDNS(o options, ips ...net.IP) error {
