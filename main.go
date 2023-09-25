@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -41,12 +42,18 @@ func process() error {
 	defer ticker.Stop()
 
 	for ; true; <-ticker.C {
-		ip, err := externalIP()
+		ipv4, err := externalIPv4()
 		if err != nil {
-			slog.Error("failed getting external IP", "error", err)
+			slog.Error("failed getting external IPv4", "error", err)
 			continue
 		}
-		if err = updateDNS(o, ip); err != nil {
+		ipv6, err := externalIPv6()
+		if err != nil {
+			slog.Error("failed getting external IPv6", "error", err)
+			continue
+		}
+
+		if err = updateDNS(o, ipv4, ipv6); err != nil {
 			slog.Error("failed updating DNS", "error", err)
 		}
 	}
@@ -58,7 +65,7 @@ type IPResponse struct {
 	Query string `json:"query"`
 }
 
-func externalIP() (net.IP, error) {
+func externalIPv4() (net.IP, error) {
 	resp, err := http.Get("http://ip-api.com/json/?fields=query")
 	if err != nil {
 		return net.IP{}, err
@@ -73,8 +80,41 @@ func externalIP() (net.IP, error) {
 	return net.ParseIP(parsed.Query), nil
 }
 
-func updateDNS(o options, ip net.IP) error {
-	url := fmt.Sprintf("http://%s:%s@dynupdate.no-ip.com/nic/update?hostname=%s&myip=%s", o.username, o.password, o.dns, ip)
+func externalIPv6() (net.IP, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return net.IP{}, err
+	}
+	for _, i := range ifaces {
+		addrs, err := i.Addrs()
+		if err != nil {
+			return net.IP{}, err
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip.IsLoopback() || ip.IsPrivate() {
+				continue
+			}
+
+			return ip, nil
+		}
+	}
+	return net.IP{}, nil
+}
+
+func updateDNS(o options, ips ...net.IP) error {
+	var ipList []string
+	for _, ip := range ips {
+		ipList = append(ipList, ip.String())
+	}
+
+	url := fmt.Sprintf("http://%s:%s@dynupdate.no-ip.com/nic/update?hostname=%s&myip=%s", o.username, o.password, o.dns, strings.Join(ipList, ","))
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
