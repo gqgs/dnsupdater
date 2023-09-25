@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-//go:generate go run github.com/gqgs/argsgen
+//go:generate go run github.com/gqgs/argsgen@latest
 
 type options struct {
 	interval string `arg:"updater internal"`
